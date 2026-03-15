@@ -159,7 +159,7 @@ sysMethod.cron.newCron('0 8 * * *', async () => {
 });
 
 // ================= 定时任务（每周日18:31打印测试图片）=================
-sysMethod.cron.newCron('31 18 * * 0', async () => {
+sysMethod.cron.newCron('0 20 * * 0', async () => {
     await ConfigDB.get();
     if (!ConfigDB.userConfig?.enable) {
         console.log('定时任务：打印机脚本未启用，跳过');

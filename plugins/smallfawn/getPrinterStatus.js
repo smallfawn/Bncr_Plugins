@@ -15,17 +15,17 @@
 
 const ipp = require('ipp');
 const { promisify } = require('util');
-const path = require('path');
 const jsonSchema = BncrCreateSchema.object({
     enable: BncrCreateSchema.boolean().setTitle('是否开启该打印机脚本').setDefault(false),
     print_url: BncrCreateSchema.string().setTitle('打印机IPP地址').setDescription(`格式 http://192.168.x.x:631/ipp/print`),
     test_enable: BncrCreateSchema.boolean().setTitle('是否开启每周自动打印测试图防止堵头').setDefault(false),
+    test_image: BncrCreateSchema.string().setTitle('测试打印图片地址').setDefault('https://gh-proxy.org/https://raw.githubusercontent.com/smallfawn/Bncr_Plugins/refs/heads/main/plugins/smallfawn/assets/printer_test.jpeg'),
 });
 const ConfigDB = new BncrPluginConfig(jsonSchema);
 
 let CONFIG = {
     PRINTER_URL: 'http://192.168.x.x:631/ipp/print',   // 默认值，实际会被配置覆盖
-    TEST_IMAGE: path.join(__dirname, 'assets', 'demo.jpg'),
+    TEST_IMAGE: '',
 }
 
 // ================= 打印机服务（每次操作动态创建 Printer）=================
@@ -160,7 +160,69 @@ sysMethod.cron.newCron('0 8 * * *', async () => {
         msg: message,
     });
 });
+// ================= 定时任务（每周日晚上8点打印测试图片并推送状态）=================
+sysMethod.cron.newCron('0 20 * * 0', async () => {
+    await ConfigDB.get();
+    if (ConfigDB?.userConfig?.print_url) {
+        CONFIG.PRINTER_URL = ConfigDB.userConfig.print_url;
+    }
+    if (!ConfigDB?.userConfig?.enable) {
+        console.log('定时任务：打印机脚本未启用，跳过');
+        return;
+    }
 
+    // 如果未启用打印测试图片，只推送当前状态
+    if (!ConfigDB?.userConfig?.test_enable) {
+        console.log('未启用打印测试图片，跳过打印');
+        return;
+    }
+    if (!ConfigDB?.userConfig?.test_image) {
+        console.log('定时任务：打印机脚本[打印测试图片]未配置图片地址，跳过打印');
+        return;
+    }
+
+    // 开始下载并打印
+    const imageUrl = ConfigDB.userConfig.test_image;
+    // 从 URL 提取文件名，简单处理
+    let filename = imageUrl.split('/').pop() || 'test_print.jpg';
+    if (!filename.includes('.')) filename += '.jpg';
+
+    try {
+        // 下载图片（二进制流）
+        const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+        const buffer = Buffer.from(response.data, 'binary');
+
+        // 确定 MIME 类型
+        let contentType = response.headers['content-type'];
+        if (!contentType || !contentType.startsWith('image/')) {
+            if (filename.endsWith('.jpg') || filename.endsWith('.jpeg')) {
+                contentType = 'image/jpeg';
+            } else {
+                contentType = 'image/jpeg'; // 默认
+            }
+        }
+
+        // 调用打印机执行打印
+        const jobId = await printer.printJob(filename, buffer, contentType, 1);
+        console.log(`测试图片打印任务已提交，Job ID: ${jobId}`);
+
+        // 打印后获取最新状态
+        let status = await getPrinterStatus();
+        let resultMsg = `测试图片打印成功，任务ID: ${jobId}\n${status}`;
+        sysMethod.pushAdmin({ platform: [], msg: resultMsg });
+    } catch (error) {
+        console.error('打印测试图片失败:', error);
+        let errorMsg = `打印测试图片失败: ${error.message}`;
+        // 尝试获取当前状态
+        try {
+            let status = await getPrinterStatus();
+            errorMsg += `\n当前打印机状态: ${status}`;
+        } catch (e) {
+            errorMsg += `\n获取打印机状态也失败: ${e.message}`;
+        }
+        sysMethod.pushAdmin({ platform: [], msg: errorMsg });
+    }
+});
 // ================= 命令入口 =================
 module.exports = async (s) => {
     // 每次命令都重新加载配置
@@ -175,6 +237,7 @@ module.exports = async (s) => {
     if (!ConfigDB?.userConfig?.print_url) {
         return sysMethod.startOutLogs('未输入打印机IPP接口 退出.');
     }
+
     // 更新全局配置
     CONFIG.PRINTER_URL = ConfigDB.userConfig.print_url;
 

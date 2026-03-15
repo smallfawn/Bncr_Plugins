@@ -1,3 +1,25 @@
 {
-  "annotation": "该文件由系统自动生成. 用于插件市场索引,请勿编辑该文件中的任何内容"
+  "annotation": "该文件由系统自动生成. 用于插件市场索引,请勿编辑该文件中的任何内容",
+  "BHnPGLdSpe5S9y2PqLJ3tip9fts=": {
+    "type": "github",
+    "name": "getPrinterStatus",
+    "author": "smallfawn",
+    "team": "smallfawnTeam",
+    "version": "1.0.0",
+    "description": "定时每天8点获取打印机状态,仅测试EPSON L4266,理论上支持WIFI的打印机都可以",
+    "classification": [
+      "工具"
+    ],
+    "filename": "getPrinterStatus.js",
+    "fileDir": "/plugins/smallfawn/getPrinterStatus.js",
+    "systemVersionRange": "",
+    "isCron": false,
+    "isAdapter": false,
+    "isMod": false,
+    "isService": false,
+    "isAuthentication": false,
+    "isEncPlugin": false,
+    "id": "BHnPGLdSpe5S9y2PqLJ3tip9fts=",
+    "isChatPlugin": true
+  }
 }

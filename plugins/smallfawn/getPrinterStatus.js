@@ -12,7 +12,6 @@
  * @classification ["工具"]
  */
 
-
 const ipp = require('ipp');
 const { promisify } = require('util');
 const axios = require('axios');
@@ -24,30 +23,24 @@ const jsonSchema = BncrCreateSchema.object({
 });
 const ConfigDB = new BncrPluginConfig(jsonSchema);
 
-let CONFIG = {
-    PRINTER_URL: 'http://192.168.x.x:631/ipp/print',   // 默认值，实际会被配置覆盖
-    TEST_IMAGE: '',
-}
-
-// ================= 打印机服务（每次操作动态创建 Printer）=================
+// ================= 打印机服务（每次操作需传入 URL）=================
 class PrinterService {
-    async _execute(operation, message) {
-        const url = CONFIG.PRINTER_URL;
+    async _execute(operation, message, url) {
         if (!url) {
-            throw new Error('打印机 URL 未配置，请先设置 print_url');
+            throw new Error('打印机 URL 未提供，请先设置 print_url');
         }
         const printer = ipp.Printer(url);
         const execute = promisify(printer.execute).bind(printer);
         return await execute(operation, message);
     }
 
-    async getStatus() {
+    async getStatus(url) {
         const msg = {
             "operation-attributes-tag": {
                 "requesting-user-name": "NodeJS-Monitor",
                 "attributes-charset": "utf-8",
                 "attributes-natural-language": "zh-cn",
-                "printer-uri": CONFIG.PRINTER_URL,      // 必须使用当前 URL
+                "printer-uri": url,      // 使用传入的 URL
                 "requested-attributes": [
                     "printer-is-accepting-jobs",
                     "printer-state",
@@ -57,7 +50,7 @@ class PrinterService {
                 ]
             }
         };
-        const res = await this._execute("Get-Printer-Attributes", msg);
+        const res = await this._execute("Get-Printer-Attributes", msg, url);
         const attrs = res["printer-attributes-tag"] || {};
 
         // 映射表
@@ -95,13 +88,13 @@ class PrinterService {
         };
     }
 
-    async printJob(filename, buffer, mimetype, copies = 1) {
+    async printJob(filename, buffer, mimetype, url, copies = 1) {
         const msg = {
             "operation-attributes-tag": {
                 "requesting-user-name": "Smart-Print-Terminal",
                 "job-name": filename,
                 "document-format": mimetype,
-                "printer-uri": CONFIG.PRINTER_URL      // 必须使用当前 URL
+                "printer-uri": url      // 使用传入的 URL
             },
             "job-attributes-tag": {
                 copies,
@@ -110,7 +103,7 @@ class PrinterService {
             },
             data: buffer
         };
-        const res = await this._execute("Print-Job", msg);
+        const res = await this._execute("Print-Job", msg, url);
         if (res.statusCode !== 'successful-ok') {
             throw new Error(`打印机拒绝任务: ${res.statusCode}`);
         }
@@ -123,11 +116,17 @@ const printer = new PrinterService();
 
 /**
  * 获取打印机状态并格式化为消息字符串
+ * 内部自动读取最新配置中的 URL
  */
 async function getPrinterStatus() {
+    await ConfigDB.get(); // 确保配置最新
+    const url = ConfigDB.userConfig.print_url;
+    if (!url) {
+        return '打印机 URL 未配置';
+    }
     let status;
     try {
-        status = await printer.getStatus();
+        status = await printer.getStatus(url);
     } catch (e) {
         console.log(e);
         status = { deviceState: 'unknown', warnings: ['无法获取状态'], inkLevels: {} };
@@ -141,78 +140,71 @@ async function getPrinterStatus() {
     return `打印机状态：${deviceStateZh}，警告：${warningsStr}，墨量：${inkStr}`;
 }
 
-// ================= 定时任务（每日检查并推送状态）=================
+// ================= 定时任务（每日8点推送状态）=================
 sysMethod.cron.newCron('0 8 * * *', async () => {
-    // 定时任务中重新读取配置，确保 URL 是最新的
     await ConfigDB.get();
-    if (ConfigDB?.userConfig?.print_url) {
-        CONFIG.PRINTER_URL = ConfigDB.userConfig.print_url;
-    } else {
-        console.log('未配置打印地址，跳过打印');
-        return;
-
-
-    }
-    // 如果未开启脚本，则不执行推送（可选）
-    if (!ConfigDB?.userConfig?.enable) {
+    if (!ConfigDB.userConfig?.enable) {
         console.log('定时任务：打印机脚本未启用，跳过');
         return;
     }
-    let message = await getPrinterStatus();
+    if (!ConfigDB.userConfig?.print_url) {
+        console.log('未配置打印地址，跳过推送');
+        return;
+    }
+    const message = await getPrinterStatus(); // 内部会使用最新 URL
     sysMethod.pushAdmin({
-        //推送所有平台
         platform: [],
-
         msg: message,
     });
 });
-// ================= 定时任务（每周日晚上8点打印测试图片并推送状态）=================
+
+// ================= 定时任务（每周日18:31打印测试图片）=================
 sysMethod.cron.newCron('31 18 * * 0', async () => {
     await ConfigDB.get();
-
-    if (!ConfigDB?.userConfig?.enable) {
+    if (!ConfigDB.userConfig?.enable) {
         console.log('定时任务：打印机脚本未启用，跳过');
         return;
     }
-    if (ConfigDB?.userConfig?.print_url) {
-        CONFIG.PRINTER_URL = ConfigDB.userConfig.print_url;
-    } else {
-        console.log('未配置打印地址，跳过打印');
+    if (!ConfigDB.userConfig?.print_url) {
+        console.log('未配置打印地址，跳过打印测试图片');
         return;
     }
+    if (!ConfigDB.userConfig?.test_enable) {
+        console.log('未启用打印测试图片功能，跳过');
 
-    if (!ConfigDB?.userConfig?.test_enable) {
-        console.log('未启用打印测试图片，跳过打印');
-        sysMethod.pushAdmin({
-            platform: [],
-            msg: '未启用打印测试图片，跳过打印',
-        });
         return;
     }
-    if (!ConfigDB?.userConfig?.test_image) {
-        console.log('定时任务：打印机脚本[打印测试图片]未配置图片地址，跳过打印');
-
+    if (!ConfigDB.userConfig?.test_image) {
+        console.log('测试图片地址未配置，跳过打印');
         sysMethod.pushAdmin({
             platform: [],
             msg: '定时任务：打印机脚本[打印测试图片]未配置图片地址，跳过打印',
         });
         return;
     }
-    CONFIG.TEST_IMAGE = ConfigDB.userConfig.test_image;
-    let res = await printTest();
+
+    const res = await printTest(); // printTest 内部会读取最新配置
     sysMethod.pushAdmin({
         platform: [],
         msg: res,
     });
 });
-async function printTest() {
-    // 如果未启用打印测试图片，只推送当前状态
 
-    // 开始下载并打印
-    const imageUrl = CONFIG.TEST_IMAGE;
+/**
+ * 执行测试图片打印（内部读取最新配置）
+ */
+async function printTest() {
+    await ConfigDB.get();
+    const imageUrl = ConfigDB.userConfig.test_image;
+    const printUrl = ConfigDB.userConfig.print_url;
+    if (!imageUrl || !printUrl) {
+        return '测试图片地址或打印机 URL 未配置';
+    }
+
     // 从 URL 提取文件名，简单处理
     let filename = imageUrl.split('/').pop() || 'test_print.jpg';
     if (!filename.includes('.')) filename += '.jpg';
+
     try {
         // 下载图片（二进制流）
         const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
@@ -228,14 +220,13 @@ async function printTest() {
             }
         }
 
-        // 调用打印机执行打印
-        const jobId = await printer.printJob(filename, buffer, contentType, 1);
+        // 调用打印机执行打印（传入 URL）
+        const jobId = await printer.printJob(filename, buffer, contentType, printUrl, 1);
         console.log(`测试图片打印任务已提交，Job ID: ${jobId}`);
 
         // 打印后获取最新状态
         let status = await getPrinterStatus();
-        let resultMsg = `测试图片打印成功，任务ID: ${jobId}\n${status}`;
-        return resultMsg;
+        return `测试图片打印成功，任务ID: ${jobId}\n${status}`;
     } catch (error) {
         console.error('打印测试图片失败:', error);
         let errorMsg = `打印测试图片失败: ${error.message}`;
@@ -248,47 +239,39 @@ async function printTest() {
         }
         return errorMsg;
     }
-
 }
+
 // ================= 命令入口 =================
 module.exports = async (s) => {
-    // 每次命令都重新加载配置
     await ConfigDB.get();
     if (!Object.keys(ConfigDB.userConfig).length) {
-        sysMethod.startOutLogs('未配置打印机脚本,退出.');
+        await s.reply({ msg: '未配置打印机脚本,退出.' });
         return;
     }
-    if (!ConfigDB?.userConfig?.enable) {
-        return sysMethod.startOutLogs('未启用打印机脚本 退出.');
+    if (!ConfigDB.userConfig?.enable) {
+        await s.reply({ msg: '未启用打印机脚本 退出.' });
+        return
     }
-    if (!ConfigDB?.userConfig?.print_url) {
-        return sysMethod.startOutLogs('未输入打印机IPP接口 退出.');
-    }
-    CONFIG.PRINTER_URL = ConfigDB.userConfig.print_url;
-
-    let msg = s.getMsg()
-    if (msg == '打印测试图片') {
-        if (!ConfigDB?.userConfig?.test_enable) {
-            console.log('未启用打印测试图片，跳过打印');
-            await s.reply({ msg: '未启用打印测试图片，跳过打印' });
-            return;
-        }
-        if (!ConfigDB?.userConfig?.test_image) {
-            console.log('定时任务：打印机脚本[打印测试图片]未配置图片地址，跳过打印');
-            await s.reply({ msg: '定时任务：打印机脚本[打印测试图片]未配置图片地址，跳过打印' });
-            return;
-        }
-        CONFIG.TEST_IMAGE = ConfigDB.userConfig.test_image;
-        let res = await printTest();
-        await s.reply({ msg: res });
-    }
-    if (msg == '打印机状态' || msg == '打印机') {
-        let message = await getPrinterStatus();
-        await s.reply({
-            msg: message,
-        });
+    if (!ConfigDB.userConfig?.print_url) {
+        await s.reply({ msg: '未输入打印机IPP接口 退出.' });
         return
     }
 
-
-}
+    const msg = s.getMsg();
+    if (msg === '打印测试图片') {
+        await s.reply({ msg: '开始打印测试图片...请稍后' });
+        if (!ConfigDB.userConfig?.test_enable) {
+            await s.reply({ msg: '未启用打印测试图片，跳过打印' });
+            return;
+        }
+        if (!ConfigDB.userConfig?.test_image) {
+            await s.reply({ msg: '未配置图片地址，跳过打印' });
+            return;
+        }
+        const res = await printTest();
+        await s.reply({ msg: res });
+    } else if (msg === '打印机状态' || msg === '打印机') {
+        const message = await getPrinterStatus();
+        await s.reply({ msg: message });
+    }
+};

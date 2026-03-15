@@ -4,7 +4,7 @@
  * @team smallfawnTeam
  * @version 1.0.0
  * @description 定时每天8点获取打印机状态,仅测试EPSON L4266,理论上支持WIFI的打印机都可以
- * @rule ^(打印机|打印机状态)$
+ * @rule ^(打印机|打印机状态|打印测试图片)$
  * @priority 0
  * @disable false
  * @admin true
@@ -147,6 +147,11 @@ sysMethod.cron.newCron('0 8 * * *', async () => {
     await ConfigDB.get();
     if (ConfigDB?.userConfig?.print_url) {
         CONFIG.PRINTER_URL = ConfigDB.userConfig.print_url;
+    } else {
+        console.log('未配置打印地址，跳过打印');
+        return;
+
+
     }
     // 如果未开启脚本，则不执行推送（可选）
     if (!ConfigDB?.userConfig?.enable) {
@@ -164,30 +169,50 @@ sysMethod.cron.newCron('0 8 * * *', async () => {
 // ================= 定时任务（每周日晚上8点打印测试图片并推送状态）=================
 sysMethod.cron.newCron('31 18 * * 0', async () => {
     await ConfigDB.get();
-    if (ConfigDB?.userConfig?.print_url) {
-        CONFIG.PRINTER_URL = ConfigDB.userConfig.print_url;
-    }
+
     if (!ConfigDB?.userConfig?.enable) {
         console.log('定时任务：打印机脚本未启用，跳过');
         return;
     }
+    if (ConfigDB?.userConfig?.print_url) {
+        CONFIG.PRINTER_URL = ConfigDB.userConfig.print_url;
+    } else {
+        console.log('未配置打印地址，跳过打印');
+        return;
+    }
 
-    // 如果未启用打印测试图片，只推送当前状态
     if (!ConfigDB?.userConfig?.test_enable) {
         console.log('未启用打印测试图片，跳过打印');
+        sysMethod.pushAdmin({
+            platform: [],
+            msg: '未启用打印测试图片，跳过打印',
+        });
         return;
     }
     if (!ConfigDB?.userConfig?.test_image) {
         console.log('定时任务：打印机脚本[打印测试图片]未配置图片地址，跳过打印');
+
+        sysMethod.pushAdmin({
+            platform: [],
+            msg: '定时任务：打印机脚本[打印测试图片]未配置图片地址，跳过打印',
+        });
         return;
     }
+    CONFIG.TEST_IMAGE = ConfigDB.userConfig.test_image;
+    let res = await printTest();
+    sysMethod.pushAdmin({
+        platform: [],
+        msg: res,
+    });
+});
+async function printTest() {
+    // 如果未启用打印测试图片，只推送当前状态
 
     // 开始下载并打印
-    const imageUrl = ConfigDB.userConfig.test_image;
+    const imageUrl = CONFIG.TEST_IMAGE;
     // 从 URL 提取文件名，简单处理
     let filename = imageUrl.split('/').pop() || 'test_print.jpg';
     if (!filename.includes('.')) filename += '.jpg';
-
     try {
         // 下载图片（二进制流）
         const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
@@ -210,7 +235,7 @@ sysMethod.cron.newCron('31 18 * * 0', async () => {
         // 打印后获取最新状态
         let status = await getPrinterStatus();
         let resultMsg = `测试图片打印成功，任务ID: ${jobId}\n${status}`;
-        sysMethod.pushAdmin({ platform: [], msg: resultMsg });
+        return resultMsg;
     } catch (error) {
         console.error('打印测试图片失败:', error);
         let errorMsg = `打印测试图片失败: ${error.message}`;
@@ -221,9 +246,10 @@ sysMethod.cron.newCron('31 18 * * 0', async () => {
         } catch (e) {
             errorMsg += `\n获取打印机状态也失败: ${e.message}`;
         }
-        sysMethod.pushAdmin({ platform: [], msg: errorMsg });
+        return errorMsg;
     }
-});
+
+}
 // ================= 命令入口 =================
 module.exports = async (s) => {
     // 每次命令都重新加载配置
@@ -238,12 +264,31 @@ module.exports = async (s) => {
     if (!ConfigDB?.userConfig?.print_url) {
         return sysMethod.startOutLogs('未输入打印机IPP接口 退出.');
     }
-
-    // 更新全局配置
     CONFIG.PRINTER_URL = ConfigDB.userConfig.print_url;
 
-    let message = await getPrinterStatus();
-    await s.reply({
-        msg: message,
-    });
+    let msg = s.getMsg()
+    if (msg == '打印测试图片') {
+        if (!ConfigDB?.userConfig?.test_enable) {
+            console.log('未启用打印测试图片，跳过打印');
+            await s.reply({ msg: '未启用打印测试图片，跳过打印' });
+            return;
+        }
+        if (!ConfigDB?.userConfig?.test_image) {
+            console.log('定时任务：打印机脚本[打印测试图片]未配置图片地址，跳过打印');
+            await s.reply({ msg: '定时任务：打印机脚本[打印测试图片]未配置图片地址，跳过打印' });
+            return;
+        }
+        CONFIG.TEST_IMAGE = ConfigDB.userConfig.test_image;
+        let res = await printTest();
+        await s.reply({ msg: res });
+    }
+    if (msg == '打印机状态' || msg == '打印机') {
+        let message = await getPrinterStatus();
+        await s.reply({
+            msg: message,
+        });
+        return
+    }
+
+
 }

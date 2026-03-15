@@ -15,6 +15,7 @@
 
 const ipp = require('ipp');
 const { promisify } = require('util');
+const axios = require('axios');
 const jsonSchema = BncrCreateSchema.object({
     enable: BncrCreateSchema.boolean().setTitle('是否开启该打印机脚本').setDefault(false),
     print_url: BncrCreateSchema.string().setTitle('打印机IPP地址').setDescription(`格式 http://192.168.x.x:631/ipp/print`),
@@ -161,7 +162,7 @@ sysMethod.cron.newCron('0 8 * * *', async () => {
     });
 });
 // ================= 定时任务（每周日晚上8点打印测试图片并推送状态）=================
-sysMethod.cron.newCron('0 20 * * 0', async () => {
+sysMethod.cron.newCron('31 18 * * 0', async () => {
     await ConfigDB.get();
     if (ConfigDB?.userConfig?.print_url) {
         CONFIG.PRINTER_URL = ConfigDB.userConfig.print_url;

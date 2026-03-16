@@ -32,11 +32,12 @@ sysMethod.cron.newCron('0 * * * *', async () => {
         if (ip != newip) {
             message = `IP已变动，当前IP为：${newip}`;
             await DB.set('ip', newip);
+            sysMethod.pushAdmin({
+                platform: [],
+                msg: message,
+            });
         }
-        sysMethod.pushAdmin({
-            platform: [],
-            msg: message,
-        });
+
     }
 
 });

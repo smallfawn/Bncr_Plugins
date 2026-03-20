@@ -26,7 +26,6 @@ sysMethod.cron.newCron('0 * * * *', async () => {
     let ip = await DB.get('ip');
     if (!ip) {
         await DB.set('ip', newip);
-
     } else {
         let message = ``;
         if (ip != newip) {

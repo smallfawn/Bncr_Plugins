@@ -43,5 +43,27 @@
     "isEncPlugin": false,
     "id": "9KG7WlCCiDjxhbSh8QK/+sXvovw=",
     "isChatPlugin": true
+  },
+  "j2A0p3oXMSvoVmNZoGf7YxHoyTs=": {
+    "type": "github",
+    "name": "upsListen",
+    "author": "smallfawn",
+    "team": "smallfawnTeam",
+    "version": "1.0.0",
+    "description": "获取UPS状态并监控断电情况 (优化连接管理与异步回复)",
+    "classification": [
+      "工具"
+    ],
+    "filename": "upsListen.js",
+    "fileDir": "/plugins/smallfawn/upsListen.js",
+    "systemVersionRange": "",
+    "isCron": false,
+    "isAdapter": false,
+    "isMod": false,
+    "isService": false,
+    "isAuthentication": false,
+    "isEncPlugin": false,
+    "id": "j2A0p3oXMSvoVmNZoGf7YxHoyTs=",
+    "isChatPlugin": true
   }
 }
